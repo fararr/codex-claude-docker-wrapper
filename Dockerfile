@@ -1,6 +1,6 @@
 FROM node:24-bookworm-slim
 
-ARG CODEX_VERSION=0.128.0
+ARG CODEX_VERSION=0.135.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 

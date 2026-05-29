@@ -2,19 +2,26 @@ services:
   codex:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.minimal
       args:
-        CODEX_VERSION: 0.116.0
+        CODEX_VERSION: "0.135.0"
 
-    image: codex-local:0.116.0
-    container_name: codex-local
+    image: codex-local:minimal-0.135.0
+    container_name: codex-minimal
+
+    working_dir: /workspace
+
     stdin_open: true
     tty: true
-    working_dir: /workspace
+
+    user: "node"
 
     volumes:
       - ./project_workspace:/workspace
       - ./coder/.codex:/home/node/.codex
+
+    environment:
+      HOME: /home/node
 
     security_opt:
       - no-new-privileges:true
@@ -25,5 +32,7 @@ services:
     pids_limit: 256
     mem_limit: 4g
     cpus: 2.0
+
+    restart: "no"
 
     command: ["codex"]

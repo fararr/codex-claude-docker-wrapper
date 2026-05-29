@@ -2,255 +2,182 @@
 
 A practical setup for running **Codex only inside Docker** on macOS, with local auth storage and access limited to directories you explicitly mount.
 
-This version is written for **public GitHub / repo documentation**, so paths and examples are generic.
+The main idea is simple:
+
+- Codex is not installed globally on macOS.
+- Codex runs inside Docker.
+- Codex can only access directories mounted into the container.
+- Auth/config is stored locally in `./coder/.codex`.
+- Different images can be used for different development workflows.
 
 ---
 
-## Table of contents
+## Available images
 
-- [What this setup gives you](#what-this-setup-gives-you)
-- [How the safety model works](#how-the-safety-model-works)
-- [Directory layout](#directory-layout)
-- [1. Create the Dockerfile](#1-create-the-dockerfile)
-- [2. Create docker-compose.yaml](#2-create-docker-composeyaml)
-- [3. Create Codex config](#3-create-codex-config)
-- [4. Create .gitignore](#4-create-gitignore)
-- [5. Build the image](#5-build-the-image)
-- [6. Authenticate Codex](#6-authenticate-codex)
-- [7. Start Codex](#7-start-codex)
-- [8. Open a shell in the container](#8-open-a-shell-in-the-container)
-- [9. Resume a Codex session](#9-resume-a-codex-session)
-- [10. Add more allowed directories later](#10-add-more-allowed-directories-later)
-- [11. Recommended workflow](#11-recommended-workflow)
-- [12. Safety habits](#12-safety-habits)
-- [13. What “outside the sandbox” means](#13-what-outside-the-sandbox-means)
-- [14. Known issues you may hit](#14-known-issues-you-may-hit)
-- [15. Final notes](#15-final-notes)
+This repository contains three Codex container variants.
 
----
+### 1. Full Node-oriented image
 
-## What this setup gives you
+Files:
 
-- Codex is **not installed natively** on macOS
-- Codex runs **only inside Docker**
-- auth/config is stored locally in `./coder/.codex`
-- work happens in `./project_workspace`
-- access is limited to **explicitly mounted directories**
-- approval prompts stay enabled for riskier actions
-- image and Codex CLI version are pinned
-- PHP and Python tooling is available inside the container
+```text
+Dockerfile
+docker-compose.yml
+```
+
+Use this as the default image for:
+
+- JavaScript / TypeScript
+- frontend work
+- Node-based tooling
+- mixed Node + PHP/Python helper work
+
+It includes:
+
+- Node.js 24
+- Codex CLI
+- PHP CLI and Composer
+- Python 3
+- useful CLI tools such as `ripgrep`, `jq`, `tree`, `shellcheck`, `sqlite3`
 
 ---
 
-## How the safety model works
+### 2. Minimal Node-oriented image
 
-The real safety boundary is:
+Files:
 
-1. **Docker container**
-2. **Bind mounts**
-3. **Codex approvals**
+```text
+Dockerfile.minimal
+docker-compose.minimal.yml
+```
 
-That means:
+Use this when you want a smaller image with only the basic tools needed to run Codex.
 
-- Codex can access the container filesystem
-- Codex can access only the host directories you mount into the container
-- writable mounts can be changed, deleted, renamed, or git-modified
-- approvals do **not** give Codex access to your whole Mac
-- “outside the sandbox” does **not** mean outside Docker
+It includes:
 
-### Practical conclusion
+- Node.js 22
+- Codex CLI
+- Git
+- curl
+- ripgrep
+- basic shell/process tools
 
-In this setup, Docker is the real containment layer.
+This image is useful when you do not need PHP, Composer, Python, or extra developer tooling.
 
-Codex’s inner Linux sandbox may be unreliable in Docker Desktop, so the stable practical choice is:
+---
 
-- keep `approval_policy = "on-request"`
-- keep `sandbox_mode = "workspace-write"`
-- do **not** depend on Bubblewrap
-- keep mounts narrow and explicit
+### 3. PHP 8.3-oriented image
+
+Files:
+
+```text
+php/Dockerfile
+php/docker-compose.yml
+php/README.md
+```
+
+Use this for:
+
+- Laravel
+- Symfony
+- PHP packages
+- PHP-first work with Composer
+- mixed PHP + Python scripting
+
+This image uses the official `php:8.3-cli-bookworm` base and then installs Node.js for the Codex CLI.
 
 ---
 
 ## Directory layout
 
-Example working directory:
-
-```text
-~/codex-docker
-````
-
 Recommended structure:
 
 ```text
-~/codex-docker/
+codex-docker/
 ├── Dockerfile
 ├── Dockerfile.minimal
-├── docker-compose.yaml
-├── docker-compose.minimal.yaml
+├── docker-compose.yml
+├── docker-compose.minimal.yml
+├── README.md
 ├── .gitignore
 ├── coder/
-│   └── .codex/
-│       ├── config.toml
-│       └── auth.json
+│   ├── .codex/
+│   │   ├── config.toml
+│   │   └── auth.json
+│   ├── .composer/
+│   └── .cache/
+│       └── pip/
+├── php/
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── README.md
 └── project_workspace/
 ```
 
-### Meaning
+### Directory meaning
 
-* `Dockerfile` and `docker-compose.yaml` are the recommended full setup
-* `Dockerfile.minimal` and `docker-compose.minimal.yaml` keep the older minimal variant
-* `coder/.codex/` stores Codex config and auth on the host
-* `project_workspace/` is the main writable workspace for Codex
-
----
-
-## 1. Create the Dockerfile
-
-Create `Dockerfile`:
-
-```dockerfile
-FROM node:24-bookworm-slim
-
-ARG CODEX_VERSION=0.118.0
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    ca-certificates \
-    composer \
-    curl \
-    fd-find \
-    git \
-    jq \
-    less \
-    make \
-    patch \
-    php-cli \
-    php-curl \
-    php-intl \
-    php-mbstring \
-    php-sqlite3 \
-    php-xml \
-    php-zip \
-    procps \
-    python3 \
-    python3-pip \
-    python3-venv \
-    ripgrep \
-    shellcheck \
-    sqlite3 \
-    tini \
-    tree \
-    unzip \
-    zip \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN npm install -g @openai/codex@${CODEX_VERSION} \
-    && npm cache clean --force
-
-RUN mkdir -p /workspace /home/node/.codex /home/node/.local/bin \
-    && chown -R node:node /workspace /home/node
-
-USER node
-
-ENV HOME=/home/node
-ENV PATH=/home/node/.local/bin:/usr/local/bin:/usr/bin:/bin
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-WORKDIR /workspace
-
-RUN php -v \
-    && composer --version \
-    && python3 --version \
-    && codex --version
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["codex"]
-```
-
-### Why this version
-
-* uses stable Node LTS base image
-* pins Codex CLI version
-* includes practical PHP and Python CLI tooling
-* uses the existing `node` user from the official image
-* avoids UID/GID conflicts
-* uses `tini` for cleaner process handling
+- `coder/.codex/` stores Codex config, auth, and local state.
+- `coder/.composer/` stores Composer cache for PHP-oriented containers.
+- `coder/.cache/pip/` stores pip cache for Python tooling.
+- `project_workspace/` is the default mounted workspace.
+- `php/` contains the PHP 8.3-oriented image.
 
 ---
 
-## 2. Create docker-compose.yaml
+## Safety model
 
-Create `docker-compose.yaml`:
+The real safety boundary is:
+
+1. Docker container
+2. Docker bind mounts
+3. Codex approvals
+
+That means:
+
+- Codex can access the container filesystem.
+- Codex can access only host directories you mount.
+- Writable mounts can be edited, deleted, renamed, or git-modified.
+- Approvals do not give Codex access to your whole Mac.
+- “Outside the sandbox” means outside Codex’s inner sandbox, but still inside Docker.
+
+### Practical conclusion
+
+Docker bind mounts are the most important boundary.
+
+Keep mounts narrow:
 
 ```yaml
-services:
-  codex:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        CODEX_VERSION: "0.118.0"
-
-    image: codex-local:0.118.0
-    container_name: codex-local
-
-    working_dir: /workspace
-
-    stdin_open: true
-    tty: true
-
-    user: "node"
-
-    volumes:
-      - ./project_workspace:/workspace
-      - ./coder/.codex:/home/node/.codex
-
-      # Optional read-only reference repo/example docs:
-      # - ./reference_repo:/reference:ro
-
-    environment:
-      HOME: /home/node
-      PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUNBUFFERED: "1"
-
-    security_opt:
-      - no-new-privileges:true
-
-    cap_drop:
-      - ALL
-
-    pids_limit: 256
-    mem_limit: 4g
-    cpus: 2.0
-
-    restart: "no"
-
-    command: ["codex"]
+volumes:
+  - ./project_workspace:/workspace
 ```
 
-### What this does
+Avoid mounting broad paths such as:
 
-* mounts `./project_workspace` as `/workspace`
-* mounts `./coder/.codex` as `/home/node/.codex`
-* runs as non-root user `node`
-* drops extra Linux capabilities
-* prevents privilege escalation
-* keeps the container interactive and simple
+```yaml
+volumes:
+  - ~:/workspace
+```
+
+or:
+
+```yaml
+volumes:
+  - /Users/your-name:/workspace
+```
+
+Prefer mounting only the exact repo or package Codex should access.
 
 ---
 
-## 3. Create Codex config
+## First-time setup
 
-Create:
+From the repository root:
 
-```text
-coder/.codex/config.toml
+```bash
+mkdir -p coder/.codex coder/.composer coder/.cache/pip project_workspace
 ```
 
-Contents:
+Create `coder/.codex/config.toml`:
 
 ```toml
 model = "gpt-5.4"
@@ -262,349 +189,282 @@ cli_auth_credentials_store = "file"
 trust_level = "trusted"
 ```
 
-### Meaning
-
-* `model = "gpt-5.4"` sets the default model
-* `approval_policy = "on-request"` asks before higher-risk actions
-* `sandbox_mode = "workspace-write"` is the normal editing mode
-* `cli_auth_credentials_store = "file"` stores auth in `.codex/auth.json`
-* `trust_level = "trusted"` marks `/workspace` as a trusted project root
-
----
-
-## 4. Create .gitignore
-
-Create `.gitignore`:
+Recommended `.gitignore`:
 
 ```gitignore
 coder/.codex/auth.json
 coder/.codex/*.db
 coder/.codex/logs/
-```
-
-This prevents local auth and transient state from being committed.
-
----
-
-## 5. Build the image
-
-From the project root:
-
-```bash
-docker compose build
+coder/.composer/
+coder/.cache/
 ```
 
 ---
 
-## 6. Authenticate Codex
+## Build images
 
-Use device auth:
-
-```bash
-docker compose run --rm codex codex login --device-auth
-```
-
-This is usually simpler than browser callback login inside Docker.
-
-After login, auth is reused from:
-
-```text
-./coder/.codex/auth.json
-```
-
-So future runs are normally just:
+### Full Node image
 
 ```bash
-docker compose run --rm codex
+docker compose -f docker-compose.yml build
+```
+
+### Minimal Node image
+
+```bash
+docker compose -f docker-compose.minimal.yml build
+```
+
+### PHP 8.3 image
+
+```bash
+docker compose -f php/docker-compose.yml build
 ```
 
 ---
 
-## 7. Start Codex
+## Authenticate Codex
 
-Start interactive Codex:
+Authenticate once. The auth is stored in `./coder/.codex`, so it can be reused by all image variants.
+
+For the default image:
 
 ```bash
-docker compose run --rm codex
+docker compose -f docker-compose.yml run --rm codex codex login --device-auth
 ```
 
-Run a direct command:
+For the PHP image:
 
 ```bash
-docker compose run --rm codex codex --help
+docker compose -f php/docker-compose.yml run --rm codex codex login --device-auth
+```
+
+Device auth is usually the simplest login method from inside Docker.
+
+---
+
+## Start Codex
+
+### Full Node image
+
+```bash
+docker compose -f docker-compose.yml run --rm codex
+```
+
+### Minimal Node image
+
+```bash
+docker compose -f docker-compose.minimal.yml run --rm codex
+```
+
+### PHP 8.3 image
+
+```bash
+docker compose -f php/docker-compose.yml run --rm codex
 ```
 
 ---
 
-## 8. Open a shell in the container
+## Open a shell
 
-Fresh shell:
-
-```bash
-docker compose run --rm codex bash
-```
-
-If the container is already running:
+### Full Node image
 
 ```bash
-docker compose exec codex bash
+docker compose -f docker-compose.yml run --rm codex bash
 ```
 
-Useful checks inside:
+### Minimal Node image
+
+```bash
+docker compose -f docker-compose.minimal.yml run --rm codex bash
+```
+
+### PHP 8.3 image
+
+```bash
+docker compose -f php/docker-compose.yml run --rm codex bash
+```
+
+Useful checks:
 
 ```bash
 whoami
 pwd
-php -v
-python3 --version
-composer --version
 codex --version
+node -v
 ls -la /workspace
 ls -la /home/node/.codex
 ```
 
+For the full Node image:
+
+```bash
+php -v
+composer --version
+python3 --version
+```
+
+For the PHP image:
+
+```bash
+php -v
+composer --version
+node -v
+npm -v
+python3 --version
+```
+
 ---
 
-## 9. Resume a Codex session
+## Resume a Codex session
 
 Resume the most recent session:
 
 ```bash
-docker compose run --rm codex resume --last
+docker compose -f docker-compose.yml run --rm codex codex resume --last
+```
+
+With the PHP image:
+
+```bash
+docker compose -f php/docker-compose.yml run --rm codex codex resume --last
 ```
 
 Resume a specific session:
 
 ```bash
-docker compose run --rm codex resume YOUR_SESSION_ID
-```
-
-Example:
-
-```bash
-docker compose run --rm codex resume 013d2754-b870-72a2-38bc-5250df853335
+docker compose -f docker-compose.yml run --rm codex codex resume YOUR_SESSION_ID
 ```
 
 ---
 
-## 10. Add more allowed directories later
+## Workspace mounts
 
-If you want Codex to access more directories, mount them explicitly.
-
-Example:
+The default root compose file mounts:
 
 ```yaml
 volumes:
-  - ./project_workspace:/workspace/project_workspace
-  - ../another_repo:/workspace/another_repo
+  - ./project_workspace:/workspace
   - ./coder/.codex:/home/node/.codex
 ```
 
-### Read-only reference mount
+That means Codex can edit `./project_workspace`.
+
+You can replace this with a real project path:
+
+```yaml
+volumes:
+  - /Users/your-name/Work/my-project:/workspace
+  - ./coder/.codex:/home/node/.codex
+```
+
+For stricter work, mount only a package/subdirectory:
+
+```yaml
+volumes:
+  - /Users/your-name/Work/my-project/packages/MyPackage:/workspace
+  - ./coder/.codex:/home/node/.codex
+```
+
+### Read-only reference mounts
 
 If Codex should only read a directory:
 
 ```yaml
-- ../reference_repo:/workspace/reference_repo:ro
+volumes:
+  - ./project_workspace:/workspace
+  - ../reference_repo:/reference:ro
+  - ./coder/.codex:/home/node/.codex
 ```
 
-This is the safest way to provide reference access without allowing edits.
+Use read-only mounts for documentation, examples, or reference repos.
 
 ---
 
-## 11. Recommended workflow
+## Recommended workflow
 
-### First-time setup
-
-```bash
-mkdir -p coder/.codex project_workspace
-docker compose build
-docker compose run --rm codex codex login --device-auth
-```
-
-### Daily use
-
-```bash
-docker compose run --rm codex
-```
-
-### Open shell
-
-```bash
-docker compose run --rm codex bash
-```
-
-### Resume last session
-
-```bash
-docker compose run --rm codex resume --last
-```
+1. Mount only the exact directory Codex should access.
+2. Make sure the project is in Git.
+3. Commit a clean baseline before large Codex edits.
+4. Keep `approval_policy = "on-request"`.
+5. Review commands that install packages, delete files, modify Git state, or access unexpected paths.
+6. Use the PHP 8.3 image for Laravel/Symfony/PHP-first work.
+7. Use the default Node image for frontend/Node-first work.
+8. Use the minimal image only when you want fewer tools inside the container.
 
 ---
 
-## 12. Safety habits
+## Known issues
 
-### Use git in the workspace
+### Docker context mismatch
 
-Inside `project_workspace`:
+If Docker still tries to connect to an old runtime such as OrbStack, switch Docker context:
 
 ```bash
-cd project_workspace
-git init
-git add .
-git commit -m "baseline before Codex"
+docker context ls
+docker context use desktop-linux
 ```
-
-This gives you a rollback point before Codex starts making changes.
-
-### Keep mounts narrow
-
-Good:
-
-```yaml
-- ./project_workspace:/workspace
-```
-
-Avoid mounting your whole home directory or large parent folders unless truly necessary.
-
-### Use read-only mounts where possible
-
-Example:
-
-```yaml
-- ../reference_repo:/workspace/reference_repo:ro
-```
-
-### Read approvals carefully
-
-Usually reasonable to approve:
-
-* edits you explicitly requested in `/workspace`
-* local tests or formatters in the workspace
-* normal source file creation and updates
-
-Pause and inspect more carefully:
-
-* package installs
-* network-heavy actions
-* mass deletes
-* git commands with side effects
-* anything mentioning unexpected paths
 
 ---
-
-## 13. What “outside the sandbox” means
-
-If Codex asks to run something “outside the sandbox”, that means:
-
-* outside Codex’s **inner** sandbox
-* but still **inside Docker**
-
-It does **not** mean:
-
-* outside the container
-* full access to macOS
-* automatic access to unmounted host paths
-
-It still only has access to:
-
-* container paths
-* mounted directories
-* container network
-
-### Important rule
-
-Approvals do **not** expand Docker’s mount boundary.
-
-They only allow more action inside the boundaries the container already has.
-
----
-
-## 14. Known issues you may hit
 
 ### Docker credential helper error
 
-You may see an error like:
+You may see:
 
 ```text
 error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH
 ```
 
-Cause:
+This is a Docker CLI configuration problem, not a Codex problem.
 
-* Docker CLI is configured to use a missing credential helper
-
-Fix:
-
-* remove the stale `credsStore` entry from `~/.docker/config.json`
-
-This is a Docker client problem, not a Codex auth problem.
+Usually it means `~/.docker/config.json` references a missing credential helper.
 
 ---
 
-### UID/GID 1000 conflict
+### Bubblewrap warning
 
-You may see:
+Codex may print something like:
 
 ```text
-groupadd: GID '1000' already exists
+Codex could not find bubblewrap on PATH...
+Codex will use the bundled bubblewrap in the meantime.
 ```
 
-Cause:
+This means Codex did not find a system-installed `bwrap` binary and will try its bundled fallback.
 
-* the official Node image already contains the `node` user/group using UID/GID 1000
+For this Docker setup, that is usually acceptable. The practical containment layer is Docker plus narrow bind mounts. Bubblewrap inside Docker Desktop can be unreliable because of namespace restrictions.
 
-Fix:
+---
 
-* do not create a custom user
-* use the existing `node` user
+### “Outside the sandbox”
 
-That is why the final setup uses:
+If Codex asks to run something “outside the sandbox”, that means outside Codex’s inner sandbox, but still inside the Docker container.
 
-```dockerfile
-USER node
-ENV HOME=/home/node
+It does not mean Codex suddenly gets access to your whole Mac.
+
+Approvals do not expand Docker’s bind mount boundary.
+
+---
+
+## Minimal compose note
+
+Make sure `docker-compose.minimal.yml` points to the minimal Dockerfile:
+
+```yaml
+build:
+  context: .
+  dockerfile: Dockerfile.minimal
+```
+
+Also prefer unique image/container names for each variant to avoid collisions, for example:
+
+```yaml
+image: codex-local:minimal-0.135.0
+container_name: codex-minimal
 ```
 
 ---
 
-### Bubblewrap / inner sandbox notes
+## One-line summary
 
-Codex may use an OS-level local sandbox, but Bubblewrap availability inside Docker is environment-dependent.
-
-Checks:
-
-* `bwrap --version`
-* minimal `bwrap` sandbox command
-* `unshare -U true` to verify user namespaces
-
-Common issues:
-
-* namespace permission errors
-* `Operation not permitted`
-* `bwrap: Unknown option --argv0` (usually Bubblewrap version mismatch)
-
-Practical decision for this Docker setup:
-
-* do not depend on Bubblewrap
-* keep Codex approvals enabled
-* rely on Docker mounts and container restrictions as the main containment boundary
-
----
-
-## 15. Final notes
-
-This is the stable practical setup for Dockerized Codex on macOS:
-
-* Codex runs only in Docker
-* auth is stored locally in `./coder/.codex`
-* work happens in `./project_workspace`
-* access is limited to explicitly mounted directories
-* approvals remain enabled
-* Docker is the real containment layer
-* Bubblewrap is intentionally not required in this setup
-* PHP and Python tooling is included in the full image
-
-### One-line summary
-
-**Codex runs only inside Docker, reuses file-based auth from `./coder/.codex`, edits only explicitly mounted directories, and relies on Docker isolation plus approval prompts rather than a fragile inner Linux sandbox.**
+Codex runs only inside Docker, reuses file-based auth from `./coder/.codex`, edits only explicitly mounted directories, and relies on Docker isolation plus approval prompts rather than broad host access.

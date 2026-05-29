@@ -1,0 +1,52 @@
+services:
+  codex:
+    build:
+      context: ..
+      dockerfile: php/Dockerfile
+      args:
+        CODEX_VERSION: "0.135.0"
+        NODE_MAJOR: "24"
+
+    image: codex-local:php-0.135.0
+    container_name: codex-php
+
+    working_dir: /workspace
+
+    stdin_open: true
+    tty: true
+
+    user: "1000:1000"
+
+    volumes:
+      # Mount only the directory Codex should access.
+      # Example:
+      - ../project_workspace:/workspace
+
+      - ../coder/.codex:/home/node/.codex
+      - ../coder/.composer:/home/node/.composer
+      - ../coder/.cache/pip:/home/node/.cache/pip
+
+      # Optional read-only reference repo:
+      # - ../reference_repo:/reference:ro
+
+    environment:
+      HOME: /home/node
+      COMPOSER_HOME: /home/node/.composer
+      COMPOSER_CACHE_DIR: /home/node/.composer/cache
+      PIP_CACHE_DIR: /home/node/.cache/pip
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    pids_limit: 256
+    mem_limit: 4g
+    cpus: 2.0
+
+    restart: "no"
+
+    command: ["codex"]
