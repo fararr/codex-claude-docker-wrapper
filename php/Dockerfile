@@ -1,6 +1,6 @@
 FROM php:8.3-cli-bookworm
 
-ARG CODEX_VERSION=0.135.0
+ARG CODEX_VERSION=0.142.0
 ARG NODE_MAJOR=24
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -43,7 +43,13 @@ RUN mkdir -p /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions useful for Laravel / Symfony CLI work
-RUN docker-php-ext-install -j"$(nproc)" intl zip
+RUN docker-php-ext-install -j"$(nproc)" \
+    intl \
+    pdo_mysql \
+    mysqli \
+    zip \
+    bcmath \
+    opcache
 
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer

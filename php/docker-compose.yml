@@ -4,10 +4,10 @@ services:
       context: ..
       dockerfile: php/Dockerfile
       args:
-        CODEX_VERSION: "0.135.0"
+        CODEX_VERSION: "0.142.0"
         NODE_MAJOR: "24"
 
-    image: codex-local:php-0.135.0
+    image: codex-local:php-0.142.0
     container_name: codex-php
 
     working_dir: /workspace
