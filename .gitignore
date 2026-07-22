@@ -1,9 +1,14 @@
-# Dockerized Codex wrapper repo
+# Dockerized Codex & Claude Code wrapper repo
 # Keep only shared config in version control.
 # Ignore local auth, local state, and writable workspace contents.
 
 coder/.codex/*
 !coder/.codex/config.toml
+
+coder/.composer/*
+
+coder/.claude/*
+!coder/.claude/settings.json
 
 project_workspace/
 
@@ -14,3 +19,5 @@ project_workspace/
 .env
 .env.*
 !.env.example
+
+temp_codex_prompts/*

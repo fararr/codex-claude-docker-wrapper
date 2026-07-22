@@ -1,0 +1,70 @@
+# docker-compose.yml   (claudecode/docker-compose.yml)
+# Run from the repository root, e.g.:
+#   docker compose -f claudecode/docker-compose.yml run --rm claude-code
+services:
+  claude-code:
+    build:
+      context: ..
+      dockerfile: claudecode/Dockerfile
+      args:
+        CLAUDE_CODE_VERSION: "2.1.202"
+        NODE_MAJOR: "24"
+
+    image: claude-code-local:php-2.1.202
+    container_name: claude-code-php
+
+    working_dir: /workspace
+
+    stdin_open: true
+    tty: true
+
+    user: "1000:1000"
+
+    volumes:
+      # The ONLY code Claude Code can see. Everything outside this is invisible.
+      # - ../project_workspace:/workspace
+
+      # Single persistent config + AUTH dir (matches CLAUDE_CONFIG_DIR in the image).
+      # Your login token lands here as coder/.claude/.credentials.json — the
+      # direct analog of coder/.codex/auth.json. Create + own it first:
+      #   mkdir -p ../coder/.claude && chown 1000:1000 ../coder/.claude
+      - ../coder/.claude:/home/node/.claude
+
+      - ../coder/.composer:/home/node/.composer
+      - ../coder/.cache/pip:/home/node/.cache/pip
+
+      # Optional read-only reference repo:
+      # - ../reference_repo:/reference:ro
+
+    environment:
+      HOME: /home/node
+      CLAUDE_CONFIG_DIR: /home/node/.claude
+
+      # Auth is via the persisted token in the mounted .claude dir (see README:
+      # run `claude` once to log in). No API key needed for that path.
+      # Alternative (Console/API billing): uncomment and put the key in a
+      # gitignored .env next to this file.
+      # ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+
+      DISABLE_AUTOUPDATER: "1"
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+
+      COMPOSER_HOME: /home/node/.composer
+      COMPOSER_CACHE_DIR: /home/node/.composer/cache
+      PIP_CACHE_DIR: /home/node/.cache/pip
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+    security_opt:
+      - no-new-privileges:true
+
+    cap_drop:
+      - ALL
+
+    pids_limit: 256
+    mem_limit: 4g
+    cpus: 2.0
+
+    restart: "no"
+
+    command: ["claude"]
