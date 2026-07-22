@@ -1,3 +1,4 @@
+# Dockerfile  (codex — PHP toolchain)
 FROM php:8.3-cli-bookworm
 
 ARG CODEX_VERSION=0.142.0
@@ -30,6 +31,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libicu-dev \
     libzip-dev \
     libxml2-dev \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
+    libwebp-dev \
+    libgmp-dev \
+    libpq-dev \
+    libldap2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Node.js for Codex CLI
@@ -42,14 +50,33 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# PHP extensions useful for Laravel / Symfony CLI work
-RUN docker-php-ext-install -j"$(nproc)" \
-    intl \
-    pdo_mysql \
-    mysqli \
-    zip \
-    bcmath \
-    opcache
+# PHP extensions for Laravel / Symfony / general PHP CLI work.
+# gd, gmp, pgsql and ldap link against the -dev libs installed in the apt-get
+# block above, so that block MUST run before this one.
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-configure ldap --with-libdir=lib/"$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
+    && docker-php-ext-install -j"$(nproc)" \
+        bcmath \
+        calendar \
+        exif \
+        gd \
+        gmp \
+        intl \
+        ldap \
+        mysqli \
+        opcache \
+        pcntl \
+        pdo_mysql \
+        pdo_pgsql \
+        pgsql \
+        soap \
+        sockets \
+        zip
+
+# PECL: redis is near-ubiquitous for Laravel cache / queue / session.
+RUN pecl install redis \
+    && docker-php-ext-enable redis \
+    && rm -rf /tmp/pear
 
 # Composer
 COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
